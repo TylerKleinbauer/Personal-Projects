@@ -1,0 +1,6 @@
+requests==2.31.0
+selenium==4.19.0
+openai==1.16.2
+beautifulsoup4==4.12.2
+cloudscraper==1.2.71
+webdriver-manager==4.0.1
