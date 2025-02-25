@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def plot_correlation_heatmap(df, figsize=(11,9), vmin=-1, vmax=1, center=0, fmt='.2f'):
+def plot_correlation_heatmap(df, figsize=(11,9), vmin=-1, vmax=1, center=0, fmt='.2f', annot=True):
     """
-    Creates and displays a correlation heatmap for the given dataframe
+    Creates and displays a correlation heatmap for numeric columns in the given dataframe
     
     Parameters:
     -----------
@@ -14,20 +14,31 @@ def plot_correlation_heatmap(df, figsize=(11,9), vmin=-1, vmax=1, center=0, fmt=
     figsize : tuple, optional
         Figure size as (width, height), default (11,9)
     vmin : float, optional
-        Minimum value for the colormap, default 0
+        Minimum value for the colormap, default -1
     vmax : float, optional 
         Maximum value for the colormap, default 1
     center : float, optional
         Center value for the colormap, default 0
     fmt : str, optional
         Format string for annotation values, default '.2f'
+    annot : bool, optional
+        Whether to display annotation values, default True
     """
-    corr = df.corr()
+    # Select only numeric columns
+    numeric_df = df.select_dtypes(include=['float64', 'int64'])
+    
+    # Calculate correlation matrix
+    corr = numeric_df.corr()
+    
+    # Create mask for upper triangle
     mask = np.triu(np.ones_like(corr, dtype=bool))
+    
+    # Create figure
     f, ax = plt.subplots(figsize=figsize)
     cmap = sns.diverging_palette(240,10, sep=20, as_cmap=True)
 
-    sns.heatmap(corr,
+    # Create heatmap
+    heatmap = sns.heatmap(corr,
                 mask=mask,
                 cmap=cmap,
                 vmin=vmin,
@@ -36,10 +47,12 @@ def plot_correlation_heatmap(df, figsize=(11,9), vmin=-1, vmax=1, center=0, fmt=
                 square=True,
                 linewidths=.5,
                 cbar_kws={'shrink':.5},
-                annot=True,
+                annot=annot,
                 fmt=fmt)
     
     plt.show()
+
+    return heatmap
 
 
 def plot_all_columns(df):
