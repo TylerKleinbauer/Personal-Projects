@@ -5,9 +5,11 @@ import io
 from io import StringIO
 import zipfile
 import xml.etree.ElementTree as ET
+from sklearn.linear_model import LinearRegression
+import numpy as np
 
 ########################################################################################
-# Getting housing data
+# Getting and processing housing data
 ########################################################################################
 import re
 
@@ -102,36 +104,61 @@ def average_providers(residential_df):
     return averaged_df
 
 def stack_columns(df):
-    # Melt the dataframe to get long format
-    id_vars = ['date']
-    value_vars = [col for col in df.columns if col != 'date']
+    """
+    Pivot only the asking price and transaction price columns for three property types into a long format,
+    while preserving all other columns.
+
+    Parameters:
+    - df: Wide-format DataFrame with columns like 'Privately owned apartments - Asking price', etc.
+
+    Returns:
+    - DataFrame with 'date', 'property_type', 'asking_price', 'transaction_price', and all other original columns.
+    """
+    # Define the specific columns to stack
+    property_price_cols = [
+        'Privately owned apartments - Asking price',
+        'Privately owned apartments - Transaction price',
+        'Single-family houses - Asking price',
+        'Single-family houses - Transaction price',
+        'Apartment buildings (residential investment property) - Transaction price'
+    ]
     
-    melted_df = pd.melt(df, id_vars=id_vars, value_vars=value_vars, 
-                        var_name='property_price_type', value_name='value')
+    # Filter columns that exist in the DataFrame
+    value_vars = [col for col in property_price_cols if col in df.columns]
     
-    # Split the property_price_type column
+    # Melt only the specified price columns
+    melted_df = pd.melt(
+        df,
+        id_vars=[col for col in df.columns if col not in value_vars],  # Keep all other columns as id_vars
+        value_vars=value_vars,
+        var_name='property_price_type',
+        value_name='value'
+    )
+    
+    # Split the property_price_type column into property_type and price_type
     melted_df[['property_type', 'price_type']] = melted_df['property_price_type'].str.split(' - ', n=1, expand=True)
     
-    # Pivot to get asking and transaction prices as separate columns
-    result_df = melted_df.pivot_table(
-        index=['date', 'property_type'],
+    # Pivot to get asking_price and transaction_price as separate columns
+    pivoted_df = melted_df.pivot_table(
+        index=[col for col in melted_df.columns if col not in ['property_price_type', 'price_type', 'value']],
         columns='price_type',
         values='value'
     ).reset_index()
     
     # Rename columns
-    result_df.columns.name = None
-    result_df = result_df.rename(columns={
+    pivoted_df.columns.name = None
+    pivoted_df = pivoted_df.rename(columns={
         'Asking price': 'asking_price',
         'Transaction price': 'transaction_price'
     })
     
     # Clean property type names
-    result_df['property_type'] = result_df['property_type'].replace({
+    pivoted_df['property_type'] = pivoted_df['property_type'].replace({
         'Apartment buildings (residential investment property)': 'Apartment buildings'
     })
     
-    return result_df.sort_values(['date', 'property_type'])
+    # Ensure all original non-price columns are retained
+    return pivoted_df.sort_values(['date', 'property_type'])
 
 def join_rents(combined_df, rents_df):
     # Rename rent columns more efficiently
@@ -148,8 +175,7 @@ def get_clean_housing_data(url="https://data.snb.ch/api/cube/plimoincha/data/jso
     cleaned_df = remove_sfso_data(base_df)
     residential_df, rents_df = split_residental_rents(cleaned_df)
     averaged_df = average_providers(residential_df)
-    combined_df = stack_columns(averaged_df)
-    housing_df = join_rents(combined_df, rents_df)
+    housing_df = join_rents(averaged_df, rents_df)
     
     return {
         'base_df': base_df,
@@ -157,7 +183,6 @@ def get_clean_housing_data(url="https://data.snb.ch/api/cube/plimoincha/data/jso
         'residential_df': residential_df,
         'rents_df': rents_df,
         'averaged_df': averaged_df,
-        'combined_df': combined_df,
         'housing_df': housing_df
     }
 
@@ -430,3 +455,58 @@ def get_swiss_population_data(url="https://api.worldbank.org/v2/en/indicator/SP.
     population_df = population_df.sort_values('date')
 
     return population_df
+
+########################################################################################
+# Imputing missing values
+########################################################################################
+
+def impute_with_regression(df, target_col, predictor_col='date'):
+    """
+    Impute missing values in a target column using linear regression based on a predictor column.
+
+    Parameters:
+    - df: DataFrame with the target column containing missing values.
+    - target_col: Column to impute (e.g., 'population').
+    - predictor_col: Column to use as the predictor (default 'date', will extract year).
+
+    Returns:
+    - DataFrame with imputed values.
+    """
+    # Copy the DataFrame to avoid modifying the original
+    df_copy = df.copy()
+
+    # Extract year from date if predictor is 'date'
+    if predictor_col == 'date':
+        df_copy['year'] = df_copy['date'].dt.year
+        predictor = 'year'
+    else:
+        predictor = predictor_col
+
+    # Separate known and missing data
+    known_data = df_copy.dropna(subset=[target_col])  # Rows with non-missing target values
+    missing_data = df_copy[df_copy[target_col].isna()]  # Rows with missing target values
+
+    if len(known_data) < 2:
+        raise ValueError("Need at least 2 non-missing values to fit a regression model.")
+
+    # Prepare training data
+    X_train = known_data[[predictor]].values  # Predictor (e.g., year)
+    y_train = known_data[target_col].values   # Target (e.g., population)
+
+    # Fit linear regression model
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    # Predict missing values
+    if not missing_data.empty:
+        X_missing = missing_data[[predictor]].values
+        y_pred = model.predict(X_missing)
+        
+        # Fill missing values in the original DataFrame
+        df_copy.loc[df_copy[target_col].isna(), target_col] = y_pred
+
+    # Drop temporary 'year' column if created
+    if predictor_col == 'date':
+        df_copy = df_copy.drop(columns=['year'])
+
+    return df_copy
