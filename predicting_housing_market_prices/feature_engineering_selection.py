@@ -34,6 +34,35 @@ def generate_lagged_features(df, max_lag=3, exclude_cols=['date'], target_cols=N
     
     return df_lagged
 
+def drop_non_lagged_features(df, target_cols, exclude_cols=['date']):
+    """
+    Drop all columns that don't contain 'lag' or aren't target columns, with optional exclusions.
+    
+    Parameters:
+    - df: DataFrame with features and targets
+    - target_cols: List of target column names to preserve
+    - exclude_cols: List of additional columns to preserve (default: ['date'])
+    
+    Returns:
+    - DataFrame with only lagged features, targets, and excluded columns
+    """
+    # Create list of columns to keep
+    cols_to_keep = []
+    
+    # Add excluded columns if they exist in df
+    cols_to_keep.extend([col for col in exclude_cols if col in df.columns])
+    
+    # Add target columns if they exist in df 
+    cols_to_keep.extend([col for col in target_cols if col in df.columns])
+    
+    # Add all columns containing 'lag'
+    lag_cols = [col for col in df.columns if 'lag' in col]
+    cols_to_keep.extend(lag_cols)
+    
+    # Return DataFrame with only kept columns
+    return df[cols_to_keep]
+
+
 def select_features_by_correlation(df, target_cols, threshold=0.3):
     """
     Select features with correlation above a threshold to specified targets.

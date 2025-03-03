@@ -457,6 +457,177 @@ def get_swiss_population_data(url="https://api.worldbank.org/v2/en/indicator/SP.
     return population_df
 
 ########################################################################################
+# Getting and merging all data
+########################################################################################
+
+
+def get_and_merge_all_data():
+    """
+    Fetches all data from different sources and merges them on the date column.
+    Returns a single dataframe with all variables joined.
+    """
+    # Get Housing Data
+    dfs = get_clean_housing_data()
+    housing_df = dfs['housing_df']
+    
+    # Get Demographics Data
+    raw_demographics_df = get_demographics_data()
+    demographics_df = long_to_wide_demographics(raw_demographics_df)
+    
+    # Get Interest Rates Data
+    monthly_interest_rates_df = get_and_process_snb_data(url="https://data.snb.ch/api/cube/zimoma/data/json/en")
+    interest_rates_df = group_data_by_year(monthly_interest_rates_df)
+    
+    # Get Monetary Base Data
+    monthly_monetary_base_df = get_and_process_snb_data(url="https://data.snb.ch/api/cube/snbmoba/data/json/en")
+    monetary_base_df = group_data_by_year(monthly_monetary_base_df)
+    
+    # Get Monetary Aggregates Data
+    monthly_monetary_aggregate_df = get_and_process_snb_data_two_header_levels(url="https://data.snb.ch/api/cube/snbmonagg/data/json/en")
+    monetary_aggregate_df = group_data_by_year(monthly_monetary_aggregate_df)
+    
+    # Get Mortgage Data
+    monthly_mortage_df = get_and_process_mortgage_data(url="https://data.snb.ch/api/cube/bakredinausbm/data/json/en")
+    mortgage_df = group_data_by_year(monthly_mortage_df)
+    
+    # Get GDP Data
+    q_gdp_df = get_and_process_snb_data_two_header_levels(url="https://data.snb.ch/api/cube/gdpgnp/data/json/en")
+    q_gdp_df = q_gdp_df[['date', 'Value, in CHF millions - Gross domestic product']]
+    gdp_df = group_data_by_year_sum(q_gdp_df)
+    gdp_df = gdp_df[gdp_df['date'].dt.year != 2024]
+    
+    # Get Population Data
+    population_df = get_swiss_population_data()
+    
+    # Get inflation Data
+    monthly_inflation_df = get_and_process_snb_data(url="https://data.snb.ch/api/cube/plkoprinfla/data/json/en")
+    monthly_inflation_df = monthly_inflation_df[['date', 'SFSO - Inflation according to the national consumer price index']]
+    inflation_df = group_data_by_year(monthly_inflation_df)
+    
+    # Merge all dataframes on date
+    merged_df = housing_df.copy()
+    dataframes = [
+        demographics_df,
+        interest_rates_df, 
+        monetary_base_df,
+        monetary_aggregate_df,
+        mortgage_df,
+        gdp_df,
+        population_df,
+        inflation_df
+    ]
+    
+    for df in dataframes:
+        merged_df = merged_df.merge(df, on='date', how='outer')
+    
+    return merged_df
+
+########################################################################################
+# Initial Filtering of data (based on domain knowledge)
+########################################################################################
+
+def filter_df(merged_data_df):
+    """
+    Filters the merged dataframe based on domain knowledge.
+    """
+    # This is when asking_price begins. Want to predict 2025
+    filtered_df = merged_data_df[(merged_data_df['date'] > '1970-01-01') & (merged_data_df['date'] < '2025-01-01')]
+    
+    # Removing some uneccesary collumm based on intuition and theory
+        # - Let's focus on Houses and Appartments for prediction -> removing appartment buildings
+        # - Changes because I already have levels
+        # - Disagregated morgage data because I will include the total
+        # - Seasonal and statistical adjustements because they may add noise
+        # - Non CH interest rates
+        # - Net measures of immi/emigtation and births/death because I will include Natural change and net migration
+        # - Short term interest rates: keeping Switzerland - CHF - Call money rate (Tomorrow next) - 1 day because more data availability
+        # - 'Level - Savings deposits', 'Level - Sight deposits',  'Level - Time deposits' because they are parts of a broader measure that I'm keeping
+        # - Different ways of quantifiying loans because I'm keeping Mortages and Total Loans which seem more pertinent and broad.
+        # - M1 and M2 Money Supply because they are narrower measures than M3
+    lean_merged_data_df = filtered_df.drop(columns=[
+        'Apartment buildings (residential investment property) - Transaction price',
+        'Change from the corresponding month of the previous year - Currency in circulation',
+        'Change from the corresponding month of the previous year - Deposits in transaction accounts',
+        'Change from the corresponding month of the previous year - Monetary aggregate M1',
+        'Change from the corresponding month of the previous year - Monetary aggregate M2',
+        'Change from the corresponding month of the previous year - Monetary aggregate M3',
+        'Change from the corresponding month of the previous year - Savings deposits',
+        'Change from the corresponding month of the previous year - Sight deposits',
+        'Change from the corresponding month of the previous year - Time deposits',
+        'Banks in Switzerland - Domestic - Total loans - Utilisation',
+        'Banks in Switzerland - Domestic - Total loans - Credit lines',
+        'Banks in Switzerland - Domestic - Mortgage loans - Utilisation',
+        'Banks in Switzerland - Domestic - Other loans - Total - Utilisation',
+        'Banks in Switzerland - Domestic - Other loans - secured - Utilisation',
+        'Banks in Switzerland - Domestic - Other loans - unsecured - Utilisation',
+        'Banks in Switzerland - Foreign - Total loans - Utilisation',
+        'Banks in Switzerland - Foreign - Total loans - Credit lines',
+        'Banks in Switzerland - Foreign - Mortgage loans - Utilisation',
+        'Banks in Switzerland - Foreign - Other loans - Total - Utilisation',
+        'Banks in Switzerland - Foreign - Other loans - secured - Utilisation',
+        'Banks in Switzerland - Foreign - Other loans - unsecured - Utilisation',
+        'Statistical adjustments',
+        'Seasonally adjusted - Seasonal factor',
+        'United States - USD - SOFR - 1-day',
+        'United States - USD - USD LIBOR - 3-month',
+        'United Kingdom - GBP - GBP LIBOR - 3-month',
+        'Euro area - EUR - ESTR - 1-day', 'Euro area - EUR - EURIBOR - 3-month',
+        'Euro area - EUR - EUR LIBOR - 3-month',
+        'Japan - JPY - TONA - 1-day',	
+        'Japan - JPY - JPY LIBOR - 3-month',	
+        'United Kingdom - GBP - SONIA - 1-day',
+        'Deaths', 
+        'Emigration',
+        'Immigration', 
+        'Live births',
+        'Switzerland - CHF - SARON - 1 day',
+        'Switzerland - CHF - Money market debt register claims of the Swiss Confederation - 3-month',
+        'Switzerland - CHF - CHF LIBOR - 3-month',
+        'Level - Savings deposits',
+        'Level - Sight deposits', 
+        'Level - Time deposits',
+        'Banks in Switzerland - Total domestic and foreign - Total loans - Credit lines',
+        'Banks in Switzerland - Total domestic and foreign - Other loans - Total - Utilisation',
+        'Banks in Switzerland - Total domestic and foreign - Other loans - secured - Utilisation',
+        'Banks in Switzerland - Total domestic and foreign - Other loans - unsecured - Utilisation',
+        'Level - Monetary aggregate M1', 
+        'Level - Monetary aggregate M2',
+        'Utilisation - Monetary base', 
+        'Seasonally adjusted - Monetary base',
+        ])
+
+    lean_merged_data_df = lean_merged_data_df.rename(columns={
+        'Privately owned apartments - Asking price': 'target_appartments_asking_price',
+        'Privately owned apartments - Transaction price': 'target_appartments_transaction_price',
+        'Single-family houses - Asking price': 'target_houses_asking_price',
+        'Single-family houses - Transaction price': 'target_houses_transaction_price',
+        'Rents - Industrial and commercial space ': 'rents_industrial_commercial',
+        'Rents - Office space ': 'rents_office', 
+        'Rents - Rental housing units ': 'rents_houses',
+        'Rents - Retail space ': 'rents_retail',
+        'Acquisition of Swiss citizenship': 'acquisition_ch_citizenship',
+        'Natural Change': 'pop_natural_change',
+        'Net migration': 'ch_net_migration',
+        'Switzerland - CHF - Call money rate (Tomorrow next) - 1 day': 'average_call_money_rate',
+        'Origination - Relevant foreign currency positions': 'money_origin_foreign_currency_position',
+        'Origination - Securities portfolio': 'money_origin_securities_portfolio',
+        'Origination - Money market transactions': 'money_origin_money_market_transactions',
+        'Origination - Other': 'money_origin_other',
+        'Origination - Monetary base': 'money_origin_monetary_base',
+        'Utilisation - Banknotes in circulation': 'banknotes_in_circulation',
+        'Utilisation - Sight deposit accounts of domestic banks': 'sight_deposits_banks',
+        'Level - Currency in circulation': 'currency_in_circulation',
+        'Level - Deposits in transaction accounts': 'deposits_in_transaction_accounts',
+        'Level - Monetary aggregate M3': 'M3_supply',
+        'Banks in Switzerland - Total domestic and foreign - Total loans - Utilisation': 'swiss_banks_total_loans',
+        'Banks in Switzerland - Total domestic and foreign - Mortgage loans - Utilisation': 'swiss_banks_mortgage_loans',
+        'Value, in CHF millions - Gross domestic product': 'gpd',
+        'SFSO - Inflation according to the national consumer price index': 'inflation'
+    })
+    
+    return lean_merged_data_df
+
+########################################################################################
 # Imputing missing values
 ########################################################################################
 
