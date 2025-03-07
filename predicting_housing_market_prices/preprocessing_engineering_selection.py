@@ -64,58 +64,65 @@ def impute_with_regression(df, target_col, predictor_col='date'):
 # Feature Engineering
 ########################################################################################
 
+import pandas as pd
+
 def engineer_features(df, ma_window=3):
     """
-    Engineer predictive features including moving averages of prices. Features chosen for economic relevance (e.g., financing costs, market heat, momentum) and demo manageability
+    Engineer predictive features using lagged values to avoid leakage. Features chosen for economic
+    relevance (e.g., financing costs, market heat, momentum) and demo manageability.
 
     Parameters:
     - df: Wide-format DataFrame with preprocessed data and renamed columns (no lags yet).
     - ma_window: Window size for moving averages (default 3 years).
 
     Returns:
-    - DataFrame with new features to be lagged later.
+    - DataFrame with leakage-free features.
     """
     df_eng = df.copy()
     
-    # Moving Averages on original prices
+    # Generate lags for price columns first
     price_cols = [
         'appartments_asking_price',
         'appartments_transaction_price',
         'houses_asking_price',
         'houses_transaction_price'
     ]
-    
     for col in price_cols:
         if col in df_eng.columns:
-            df_eng[f'{col}_ma{ma_window}'] = df_eng[col].rolling(
-                window=ma_window, min_periods=1
-            ).mean()
+            for lag in range(1, ma_window + 1):  # Up to lag3 for ma3
+                df_eng[f'{col}_lag{lag}'] = df_eng[col].shift(lag)
     
-    # Interest rate * Mortgage Rate 
-    # Higher interest rates increase borrowing costs, potentially reducing mortgage demand and thus affecting prices.
-    df_eng['rate_x_mortgage'] = (
-        df_eng['average_call_money_rate'] * 
-        df_eng['swiss_banks_mortgage_loans']
-    )
+    # Moving Averages using lagged prices
+    for col in price_cols:
+        if col in df_eng.columns:
+            lag_cols = [f'{col}_lag{i}' for i in range(1, ma_window + 1)]
+            df_eng[f'{col}_ma{ma_window}'] = df_eng[lag_cols].mean(axis=1)
     
-    # Asking Price / Transaction price 
-    # The gap between asking and transaction prices reflects negotiation strength or market heat.
-    for prop in ['appartments', 'houses']:  # Adjusted to match new naming convention
-        df_eng[f'{prop}_ask_to_trans_ratio'] = (
-            df_eng[f'{prop}_asking_price'] / df_eng[f'{prop}_transaction_price']
-        )
-    
-    # Price growth rate
-    #The rate of price increase signals market momentum, which can predict future trends.
+    # Price growth rates using lagged values
     for prop in ['appartments', 'houses']:
         df_eng[f'{prop}_asking_growth'] = (
-            (df_eng[f'{prop}_asking_price'] - df_eng[f'{prop}_asking_price'].shift(1)) / 
-            df_eng[f'{prop}_asking_price'].shift(1)
+            (df_eng[f'{prop}_asking_price_lag1'] - df_eng[f'{prop}_asking_price_lag2']) / 
+            df_eng[f'{prop}_asking_price_lag2']
         )
         df_eng[f'{prop}_transaction_growth'] = (
-            (df_eng[f'{prop}_transaction_price'] - df_eng[f'{prop}_transaction_price'].shift(1)) / 
-            df_eng[f'{prop}_transaction_price'].shift(1)
+            (df_eng[f'{prop}_transaction_price_lag1'] - df_eng[f'{prop}_transaction_price_lag2']) / 
+            df_eng[f'{prop}_transaction_price_lag2']
         )
+    
+    # Asking Price / Transaction Price using lagged prices
+    for prop in ['appartments', 'houses']:
+        df_eng[f'{prop}_ask_to_trans_ratio'] = (
+            df_eng[f'{prop}_asking_price_lag1'] / df_eng[f'{prop}_transaction_price_lag1']
+        )
+    
+    # Interest rate * Mortgage Rate using lagged values
+    df_eng['rate_x_mortgage'] = (
+        df_eng['average_call_money_rate'].shift(1) * 
+        df_eng['swiss_banks_mortgage_loans'].shift(1)
+    )
+
+    # Dropping lagged price columns
+    df_eng = df_eng.drop(columns=[col for col in df_eng.columns if 'lag' in col and 'price' in col])
     
     return df_eng
 
@@ -318,7 +325,7 @@ def reduce_collinearity(df, target_cols, vif_threshold=10):
     Returns:
     - List of feature names that remain after removing high VIF features
     """
-    X = df.drop(columns=['date'] + target_cols).fillna(0)  # Fill NaNs for VIF
+    X = df.drop(columns=['date'] + target_cols).dropna()
     features = X.columns.tolist()
     
     while True:
