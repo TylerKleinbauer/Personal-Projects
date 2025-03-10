@@ -60,6 +60,54 @@ def impute_with_regression(df, target_col, predictor_col='date'):
 
     return df_copy
 
+
+def preprocess_df(only_lagged_df, target_cols):
+    """
+    Preprocesses the input dataframe by filtering dates, imputing missing values using regression
+    for population and GDP features, and backward filling remaining missing values.
+
+    Args:
+        df (pd.DataFrame): Input dataframe containing raw features
+
+    Returns:
+        pd.DataFrame: Preprocessed dataframe with imputed missing values and filtered dates
+
+    Notes:
+        - Filters data from 1985-01-01 onwards
+        - Uses linear regression to impute missing values for population and GDP lag features
+        - Uses backward fill for remaining missing values
+    """
+
+    # 1995 seems a good starting point because most features beging around that time.
+    preprocessed_df = only_lagged_df[only_lagged_df['date'] >= '1985-01-01']
+
+    # Population and gdp seem amenable to linear imputation
+    reg_impute_cols = [
+        'population_lag1',
+        'population_lag2', 
+        'gpd_lag1', 
+        'gpd_lag2',
+    ]
+    for col in reg_impute_cols:
+        preprocessed_df = impute_with_regression(preprocessed_df, target_col=col, predictor_col='date')
+    
+    # The other missing values do not seem amenable to imputing with regression so bfilling
+    preprocessed_df = preprocessed_df.bfill()
+
+    # Extract year from date column
+    preprocessed_df['year'] = pd.to_datetime(preprocessed_df['date']).dt.year
+    preprocessed_df = preprocessed_df.drop(columns=['date'])
+    preprocessed_df = preprocessed_df.rename(columns={'year': 'date'})
+
+    # Rorganize columns
+    cols = ['date'] + [col for col in target_cols] + [col for col in preprocessed_df.columns if col != 'date' and col not in target_cols]
+    preprocessed_df = preprocessed_df[cols]
+    
+    # Reset index after all preprocessing steps
+    preprocessed_df = preprocessed_df.reset_index(drop=True)
+    
+    return preprocessed_df
+
 ########################################################################################
 # Feature Engineering
 ########################################################################################
