@@ -1,4 +1,4 @@
-# Tyler Kleinbauer's Portfolio
+# Tyler Kleinbauer's Projects
 
 Welcome to my portfolio! This repository contains a collection of projects that demonstrate my skills in software development, data science, and machine learning. Each project showcases different aspects of my technical abilities and problem-solving approach.
 
