@@ -1,5 +1,5 @@
 # My Projects
-Welcome to my coding playground! This repo showcases my journey as a Machine Learning Engineer, blending AI, data science, and software engineering. From forecasting Swiss housing prices to building LLM-powered tools, these projects highlight my skills in Python, cloud systems, and beyond. Get in touch with me on LinkedIn (https://www.linkedin.com/in/tylerkleinbauer/).
+Welcome to my coding playground! This repo showcases my journey as an AI & Data Engineer, blending AI, data science, and software engineering. From forecasting Swiss housing prices to building LLM-powered tools, these projects highlight my skills in Python, cloud systems, and beyond. Get in touch with me on LinkedIn (https://www.linkedin.com/in/tylerkleinbauer/).
 
 ## Projects
 
