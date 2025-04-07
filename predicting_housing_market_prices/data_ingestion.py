@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import json
 import io
-from io import StringIO
+from io import StringIO, BytesIO
 import zipfile
 import xml.etree.ElementTree as ET
 from sklearn.linear_model import LinearRegression
@@ -14,6 +14,40 @@ import numpy as np
 import re
 
 def import_snb_housing_data(url="https://data.snb.ch/api/cube/plimoincha/data/json/en"):
+    """
+    Fetches and processes housing market data from the Swiss National Bank (SNB) API.
+
+    Parameters
+    ----------
+    url : str, optional
+        The SNB API endpoint URL for housing market data.
+        Default is "https://data.snb.ch/api/cube/plimoincha/data/json/en"
+
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame containing the processed housing data with:
+        - Rows indexed by date
+        - Columns representing different property types and data providers
+        - Values representing property prices/indices
+
+    Raises
+    ------
+    requests.exceptions.RequestException
+        If there's an error fetching data from the API
+    json.JSONDecodeError
+        If there's an error parsing the JSON response
+    Exception
+        For other processing errors
+
+    Notes
+    -----
+    The function:
+    1. Fetches JSON data from the SNB API
+    2. Processes each timeseries into rows with date, value, and metadata
+    3. Pivots the data into a wide format with dates as index
+    4. Returns sorted data by date
+    """
     try:
         # Get the data from the SNB API
         response = requests.get(url)
@@ -60,7 +94,23 @@ def import_snb_housing_data(url="https://data.snb.ch/api/cube/plimoincha/data/js
 
 def remove_sfso_data(df):
     """
-    Remove Swiss Federal Statistical Office data from the DataFrame
+    Filters out data from the Swiss Federal Statistical Office from the housing DataFrame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame containing housing market data with various data providers
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with the same structure but excluding columns containing 
+        'Swiss Federal Statistical Office' in their names, except for the 'date' column
+
+    Notes
+    -----
+    This function is useful for removing potentially inconsistent or differently
+    scaled data from the SFSO while retaining other data providers
     """
     # Get columns that don't contain 'Swiss Federal Statistical Office'
     non_sfso_cols = [col for col in df.columns 
@@ -69,6 +119,27 @@ def remove_sfso_data(df):
     return df[non_sfso_cols]
 
 def split_residental_rents(df):
+    """
+    Splits the housing data DataFrame into separate residential prices and rents DataFrames.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame containing both residential property prices and rents data
+
+    Returns
+    -------
+    tuple of (pandas.DataFrame, pandas.DataFrame)
+        A tuple containing:
+        - First DataFrame with residential property price columns and date
+        - Second DataFrame with rent-related columns and date
+
+    Notes
+    -----
+    Both resulting DataFrames maintain the 'date' column and their respective
+    time series data
+    """
+    
     # Get column masks
     residential_mask = df.columns.str.contains('Residential property prices') | (df.columns == 'date')
     rents_mask = df.columns.str.contains('Rents') | (df.columns == 'date')
@@ -76,6 +147,32 @@ def split_residental_rents(df):
     return df.loc[:, residential_mask], df.loc[:, rents_mask]
 
 def average_providers(residential_df):
+    """
+    Calculates average prices across different data providers for each property 
+    and price type combination.
+
+    Parameters
+    ----------
+    residential_df : pandas.DataFrame
+        DataFrame containing residential property prices from various providers
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with averaged prices containing:
+        - date column
+        - Columns for each combination of:
+            * Property types (Apartments, Single-family houses, Apartment buildings)
+            * Price types (Asking price, Transaction price)
+        
+    Notes
+    -----
+    The function:
+    1. Processes three property types: Privately owned apartments, Single-family houses,
+       and Apartment buildings
+    2. Handles both asking and transaction prices
+    3. Returns averages across providers for each property-price type combination
+    """
     types = {
         'Residential property prices': ['Privately owned apartments', 'Single-family houses', 'Apartment buildings (residential investment property)'],
         'price_type': ['Asking price', 'Transaction price'],
@@ -105,14 +202,33 @@ def average_providers(residential_df):
 
 def stack_columns(df):
     """
-    Pivot only the asking price and transaction price columns for three property types into a long format,
-    while preserving all other columns.
+    Restructures the wide-format housing data into a long format while preserving 
+    non-price columns.
 
-    Parameters:
-    - df: Wide-format DataFrame with columns like 'Privately owned apartments - Asking price', etc.
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Wide-format DataFrame with columns for different property types and their 
+        asking/transaction prices
 
-    Returns:
-    - DataFrame with 'date', 'property_type', 'asking_price', 'transaction_price', and all other original columns.
+    Returns
+    -------
+    pandas.DataFrame
+        Restructured DataFrame containing:
+        - date
+        - property_type (simplified names)
+        - asking_price
+        - transaction_price
+        - All other original columns
+
+    Notes
+    -----
+    The function:
+    1. Preserves all non-price columns
+    2. Separates property type and price type information
+    3. Creates separate columns for asking and transaction prices
+    4. Simplifies property type names (e.g., shortens 'Apartment buildings' name)
+    5. Returns data sorted by date and property type
     """
     # Define the specific columns to stack
     property_price_cols = [
@@ -161,6 +277,28 @@ def stack_columns(df):
     return pivoted_df.sort_values(['date', 'property_type'])
 
 def join_rents(combined_df, rents_df):
+    """
+    Merges the combined housing prices DataFrame with the rents DataFrame.
+
+    Parameters
+    ----------
+    combined_df : pandas.DataFrame
+        DataFrame containing combined housing price data
+    rents_df : pandas.DataFrame
+        DataFrame containing rent data for different property types
+
+    Returns
+    -------
+    pandas.DataFrame
+        Merged DataFrame containing both housing prices and rents data, joined on date
+
+    Notes
+    -----
+    The function:
+    1. Simplifies rent column names
+    2. Performs an outer join on the date column
+    3. Preserves all data from both DataFrames
+    """
     # Rename rent columns more efficiently
     rent_cols = {col: '-'.join(col.split('-')[:2]) 
                  for col in rents_df.columns 
@@ -171,6 +309,31 @@ def join_rents(combined_df, rents_df):
     return pd.merge(combined_df, renamed_rents, on='date', how='outer')
 
 def get_clean_housing_data(url="https://data.snb.ch/api/cube/plimoincha/data/json/en"):
+    """
+    Orchestrates the complete data processing pipeline for SNB housing market data.
+
+    Parameters
+    ----------
+    url : str, optional
+        The SNB API endpoint URL for housing market data.
+        Default is "https://data.snb.ch/api/cube/plimoincha/data/json/en"
+
+    Returns
+    -------
+    dict
+        Dictionary containing DataFrames at each stage of processing:
+        - 'base_df': Raw data from SNB
+        - 'cleaned_df': Data with SFSO entries removed
+        - 'residential_df': Residential property prices only
+        - 'rents_df': Rent data only
+        - 'averaged_df': Averaged prices across providers
+        - 'housing_df': Final processed housing data
+
+    Notes
+    -----
+    This function provides access to intermediate DataFrames for debugging
+    and analysis purposes while delivering the final processed dataset
+    """
     base_df = import_snb_housing_data(url)
     cleaned_df = remove_sfso_data(base_df)
     residential_df, rents_df = split_residental_rents(cleaned_df)
@@ -455,6 +618,255 @@ def get_swiss_population_data(url="https://api.worldbank.org/v2/en/indicator/SP.
     population_df = population_df.sort_values('date')
 
     return population_df
+
+########################################################################################
+# Getting additional data
+########################################################################################
+
+def get_vacancy_rate_data():
+    # Get the excel file
+    response = requests.get(url=r"https://dam-api.bfs.admin.ch/hub/api/dam/assets/32406434/master")
+
+    # Convert response content to bytes buffer
+    content = BytesIO(response.content)
+
+    # Read excel file from bytes buffer
+    df = pd.read_excel(content, header=3)
+
+    def find_first_na(df):
+        # Get first column
+        first_col = df.iloc[7:,0]
+        
+        # Find first NaN index
+        first_na_idx = first_col.isna().idxmax()
+        
+        return first_na_idx
+
+    i = find_first_na(df)
+
+    # Get just the two columns we want
+    df_1 = df.iloc[7:i, [0,-1]]
+
+    # Clean the year column by extracting just the year numbers
+    df_1.iloc[:,0] = df_1.iloc[:,0].astype(str).str.extract('(\d{4})')
+
+    # Convert vacancy_rate to float
+    df_1.iloc[:,1] = pd.to_numeric(df_1.iloc[:,1], errors='coerce')
+
+    # Rename columns for clarity
+    df_1.columns = ['date', 'vacancy_rate']
+
+    # Fill NaN values in vacancy_rate column with its mean
+    df_1['vacancy_rate'] = df_1['vacancy_rate'].infer_objects(copy=False).interpolate(method='linear')
+    
+    # Ensure year column is numeric
+    df_1['date'] = pd.to_numeric(df_1['date'])
+    
+    return df_1
+
+
+def get_new_housing_construction_data():
+    """
+    Extracts new housing construction data from the BFS Excel file.
+    
+    Returns:
+        pd.DataFrame: DataFrame containing year and number of new constructions
+    """
+    import requests
+    from io import BytesIO
+    import pandas as pd
+    
+    url = r'https://dam-api.bfs.admin.ch/hub/api/dam/assets/32106363/master'
+    
+    response = requests.get(url)
+    
+    # Convert response content to bytes buffer
+    content = BytesIO(response.content)
+    
+    # Read all sheets from excel file
+    excel_file = pd.ExcelFile(content)
+    sheet_names = excel_file.sheet_names
+    
+    # Create a list to store data from each sheet
+    data_list = []
+    
+    # Process each sheet
+    for sheet_name in sheet_names:
+        # Read the specific sheet
+        df = pd.read_excel(content, sheet_name=sheet_name)
+        
+        # For sheets with index < 18, extract cell D12 (row 10, column 3)
+        # For sheets with index >= 18, extract cell B12 (row 10, column 1)
+        if sheet_names.index(sheet_name) < 18:
+            # Check if the sheet has at least 12 rows and 4 columns
+            if df.shape[0] >= 12 and df.shape[1] >= 4:
+                # Extract value from cell D12 (row 11, column 3 in zero-based indexing)
+                cell_value = df.iloc[10, 3]
+                
+                # Add to data list with sheet name
+                data_list.append({
+                    'sheet_name': sheet_name,
+                    'cell_value': cell_value
+                })
+            else:
+                print(f"Sheet '{sheet_name}' doesn't have cell D12")
+        else:
+            # Check if the sheet has at least 12 rows and 2 columns
+            if df.shape[0] >= 12 and df.shape[1] >= 2:
+                # Extract value from cell B12 (row 11, column 1 in zero-based indexing)
+                cell_value = df.iloc[10, 1]
+                
+                # Add to data list with sheet name
+                data_list.append({
+                    'sheet_name': sheet_name,
+                    'cell_value': cell_value
+                })
+            else:
+                print(f"Sheet '{sheet_name}' doesn't have cell B12")
+    
+    # Create a dataframe from the collected data
+    result_df = pd.DataFrame(data_list)
+    
+    # Extract the first 4 characters from sheet_name and convert to year
+    result_df['date'] = result_df['sheet_name'].str[:4].astype(int)
+    
+    # Convert cell_value to numeric
+    result_df['cell_value'] = pd.to_numeric(result_df['cell_value'], errors='coerce')
+    result_df= result_df.rename(columns={'cell_value': 'new_constructions'})
+    
+    # Sort by year
+    result_df = result_df.sort_values('date')
+
+    # Keep only date and new_constructions collumns
+    result_df = result_df.drop(columns={'sheet_name'})
+    
+    return result_df
+
+def get_urban_population_data():
+    """
+    Downloads and processes urban population data from the Swiss Federal Statistical Office.
+    
+    Returns:
+        pandas.DataFrame: A dataframe containing urban population data by year.
+    """
+    # Download the Excel file
+    response = requests.get(url=r'https://dam-api.bfs.admin.ch/hub/api/dam/assets/32229112/master')
+    excel_data = io.BytesIO(response.content)
+    
+    # Read the excel file
+    df  =pd.read_excel(excel_data)
+
+    dates = df.iloc[2, 1:].values  # Row 4 starts at index 3, skip first column
+
+    # Extract values from row 6
+    values = df.iloc[4, 1:].values  # Row 6 starts at index 5, skip first column
+
+    # Create a new dataframe with the data in long format
+    urban_population_df = pd.DataFrame({
+        'date': dates,
+        'pop_in_agglomeration': values
+    })
+
+    # Clean up the dataframe
+    urban_population_df = urban_population_df.dropna()
+
+    # Extract first 4 characters of date and convert to year
+    urban_population_df['date'] = urban_population_df['date'].astype(str).str[:4].astype(int)
+
+    # Drop the last row
+    urban_population_df = urban_population_df.iloc[:-1]
+    
+    return urban_population_df
+
+def get_divorce_data():
+    """
+    Downloads and processes divorce data from the Swiss Federal Statistical Office.
+    
+    Returns:
+        pandas.DataFrame: A dataframe containing divorce statistics by year.
+    """
+
+    # Get the API response
+    response = requests.get(url=r"https://www.pxweb.bfs.admin.ch/api/v1/fr/px-x-0102020203_110/px-x-0102020203_110.px")
+
+    # Parse the JSON data
+    data = json.loads(response.text)
+
+    # Extract the data into a DataFrame
+    if 'variables' in data:
+        # Process the metadata and structure
+        variables = data['variables']
+        
+        # Extract years and indicators
+        years = [vt for vt in variables[0]['valueTexts']]
+        indicators = [vt for vt in variables[1]['valueTexts']]
+        
+        # Create a query to get the actual data
+        query = {
+            "query": [
+                {
+                    "code": "Jahr",
+                    "selection": {
+                        "filter": "item",
+                        "values": variables[0]['values']
+                    }
+                },
+                {
+                    "code": "Demografisches Merkmal und Indikator",
+                    "selection": {
+                        "filter": "item",
+                        "values": variables[1]['values']
+                    }
+                }
+            ],
+            "response": {
+                "format": "json-stat2"
+            }
+        }
+        
+        # Get the data
+        data_response = requests.post(
+            url=r"https://www.pxweb.bfs.admin.ch/api/v1/fr/px-x-0102020203_110/px-x-0102020203_110.px",
+            json=query
+        )
+        
+        # Parse the data
+        data_json = json.loads(data_response.text)
+        
+        # Create a dataframe
+        rows = []
+        if 'dimension' in data_json and 'value' in data_json:
+            values = data_json['value']
+            size0 = len(variables[0]['values'])
+            size1 = len(variables[1]['values'])
+            
+            for i in range(size0):
+                for j in range(size1):
+                    index = i * size1 + j
+                    if index < len(values):
+                        rows.append({
+                            'date': years[i],
+                            'indicator': indicators[j],
+                            'value': values[index]
+                        })
+        
+        divorces_df = pd.DataFrame(rows)
+        
+        # Convert year to datetime and value to numeric
+        divorces_df['date'] = pd.to_numeric(divorces_df['date'])
+        divorces_df['value'] = pd.to_numeric(divorces_df['value'], errors='coerce')
+        
+        # Pivot the dataframe to have indicators as columns
+        divorces_df = divorces_df.pivot(index='date', columns='indicator', values='value').reset_index()
+        
+        # Keep only the year and Divorces - Total columns
+        divorces_df = divorces_df[['date', 'Divorces - Total']]
+    else:
+        print("JSON structure is different than expected. Examine the data:")
+        print(data.keys())
+        divorces_df = pd.DataFrame()
+    
+    return divorces_df
 
 ########################################################################################
 # Getting and merging all data
