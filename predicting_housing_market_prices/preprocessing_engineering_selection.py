@@ -6,7 +6,7 @@ from sklearn.feature_selection import RFE
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 ########################################################################################
-# Imputing missing values
+# Data Preprocessing and Feature Engineering
 ########################################################################################
 
 def impute_with_regression(df, target_col, predictor_col='date'):
@@ -107,12 +107,6 @@ def preprocess_df(only_lagged_df, target_cols):
     preprocessed_df = preprocessed_df.reset_index(drop=True)
     
     return preprocessed_df
-
-########################################################################################
-# Feature Engineering
-########################################################################################
-
-import pandas as pd
 
 def engineer_features(df, ma_window=3):
     """
@@ -233,6 +227,95 @@ def drop_non_lagged_features(df, target_cols, exclude_cols=['date']):
     
     # Return DataFrame with only kept columns
     return df[cols_to_keep]
+
+
+def prepare_data(merged_data_df):
+    """
+    Preprocesses the merged data dataframe by filtering dates, renaming columns, and engineering features.
+    
+    Args:
+        merged_data_df (pd.DataFrame): The merged data dataframe.
+
+    Returns:
+        pd.DataFrame: The preprocessed dataframe.
+    """
+    # First date filter. Keeping rows back to 1970 to include more data when shifting DF.
+    filtered_df = merged_data_df[(merged_data_df['date'] > '1970-01-01') & (merged_data_df['date'] < '2025-01-01')]
+
+    # Rename columns
+    filtered_df = filtered_df.rename(columns={
+        'Privately owned apartments - Asking price': 'appartments_asking_price',
+        'Privately owned apartments - Transaction price': 'appartments_transaction_price',
+        'Single-family houses - Asking price': 'houses_asking_price',
+        'Single-family houses - Transaction price': 'houses_transaction_price',
+        'Rents - Industrial and commercial space ': 'rents_industrial_commercial',
+        'Rents - Office space ': 'rents_office', 
+        'Rents - Rental housing units ': 'rents_houses',
+        'Rents - Retail space ': 'rents_retail',
+        'Acquisition of Swiss citizenship': 'acquisition_ch_citizenship',
+        'Natural Change': 'pop_natural_change',
+        'Net migration': 'ch_net_migration',
+        'Switzerland - CHF - Call money rate (Tomorrow next) - 1 day': 'average_call_money_rate',
+        'Origination - Relevant foreign currency positions': 'money_origin_foreign_currency_position',
+        'Origination - Securities portfolio': 'money_origin_securities_portfolio',
+        'Origination - Money market transactions': 'money_origin_money_market_transactions',
+        'Origination - Other': 'money_origin_other',
+        'Origination - Monetary base': 'money_origin_monetary_base',
+        'Utilisation - Banknotes in circulation': 'banknotes_in_circulation',
+        'Utilisation - Sight deposit accounts of domestic banks': 'sight_deposits_banks',
+        'Level - Currency in circulation': 'currency_in_circulation',
+        'Level - Deposits in transaction accounts': 'deposits_in_transaction_accounts',
+        'Level - Monetary aggregate M3': 'M3_supply',
+        'Banks in Switzerland - Total domestic and foreign - Total loans - Utilisation': 'swiss_banks_total_loans',
+        'Banks in Switzerland - Total domestic and foreign - Mortgage loans - Utilisation': 'swiss_banks_mortgage_loans',
+        'Value, in CHF millions - Gross domestic product': 'gpd',
+        'SFSO - Inflation according to the national consumer price index': 'inflation'
+    })
+
+    # Engineer features
+    df_eng = engineer_features(filtered_df)
+
+    # Get target collumn
+    target_cols = [col for col in [
+            'appartments_asking_price',
+            'appartments_transaction_price',
+            'houses_asking_price',
+            'houses_transaction_price'
+        ] if col in df_eng.columns]  # Only include targets that exist in df
+
+    # Get columns to exclude
+    exclude_cols = [col for col in [
+        'date', 
+        'appartments_asking_price_ma3', 
+        'appartments_transaction_price_ma3',	
+        'houses_asking_price_ma3',	
+        'houses_transaction_price_ma3',	
+        'appartments_asking_growth',	
+        'appartments_transaction_growth',	
+        'houses_asking_growth',
+        'houses_transaction_growth',
+        'appartments_ask_to_trans_ratio',
+        'houses_ask_to_trans_ratio',
+        'rate_x_mortgage'] if col in df_eng.columns]
+
+    # Generate laggs excluding 
+    lagged_df = generate_lagged_features(df=df_eng, target_cols=target_cols, exclude_cols=exclude_cols)
+    only_lagged_df = drop_non_lagged_features(df=lagged_df, target_cols=target_cols, exclude_cols=exclude_cols)
+
+    target_cols = [col for col in [
+            'appartments_asking_price',
+            'appartments_transaction_price',
+            'houses_asking_price',
+            'houses_transaction_price'
+        ] if col in only_lagged_df.columns]  # Only include targets that exist in df
+
+    
+    preprocessed_df = preprocess_df(only_lagged_df, target_cols=target_cols)
+
+    preprocessed_df = preprocessed_df.ffill()
+
+    return preprocessed_df
+
 
 ########################################################################################
 # Feature Selection

@@ -7,6 +7,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from sklearn.linear_model import LinearRegression
 import numpy as np
+import datetime
 
 ########################################################################################
 # Getting and processing housing data
@@ -659,8 +660,11 @@ def get_vacancy_rate_data():
     # Fill NaN values in vacancy_rate column with its mean
     df_1['vacancy_rate'] = df_1['vacancy_rate'].infer_objects(copy=False).interpolate(method='linear')
     
-    # Ensure year column is numeric
-    df_1['date'] = pd.to_numeric(df_1['date'])
+    # Ensure year column is datetime
+    df_1['date'] = pd.to_datetime(df_1['date'].astype(str)+'-01-01', format='%Y-%m-%d', errors='coerce')
+    
+    # Group by date and take the mean of duplicate dates
+    df_1 = df_1.groupby('date', as_index=False).mean()
     
     return df_1
 
@@ -727,8 +731,9 @@ def get_new_housing_construction_data():
     # Create a dataframe from the collected data
     result_df = pd.DataFrame(data_list)
     
-    # Extract the first 4 characters from sheet_name and convert to year
+    # Extract the first 4 characters from sheet_name and convert to datetime
     result_df['date'] = result_df['sheet_name'].str[:4].astype(int)
+    result_df['date'] = pd.to_datetime(result_df['date'].astype(str)+'-01-01', format='%Y-%m-%d', errors='coerce')
     
     # Convert cell_value to numeric
     result_df['cell_value'] = pd.to_numeric(result_df['cell_value'], errors='coerce')
@@ -739,6 +744,9 @@ def get_new_housing_construction_data():
 
     # Keep only date and new_constructions collumns
     result_df = result_df.drop(columns={'sheet_name'})
+    
+    # Group by date and take the mean of duplicate dates
+    result_df = result_df.groupby('date', as_index=False).mean()
     
     return result_df
 
@@ -772,6 +780,7 @@ def get_urban_population_data():
 
     # Extract first 4 characters of date and convert to year
     urban_population_df['date'] = urban_population_df['date'].astype(str).str[:4].astype(int)
+    urban_population_df['date'] = pd.to_datetime(urban_population_df['date'].astype(str)+'-01-01', format='%Y-%m-%d', errors='coerce')
 
     # Drop the last row
     urban_population_df = urban_population_df.iloc[:-1]
@@ -798,8 +807,8 @@ def get_divorce_data():
         variables = data['variables']
         
         # Extract years and indicators
-        years = [vt for vt in variables[0]['valueTexts']]
-        indicators = [vt for vt in variables[1]['valueTexts']]
+        years = variables[0]['valueTexts']
+        indicators = variables[1]['valueTexts']
         
         # Create a query to get the actual data
         query = {
@@ -824,18 +833,18 @@ def get_divorce_data():
             }
         }
         
-        # Get the data
+        # Make a POST request to get the actual data
         data_response = requests.post(
             url=r"https://www.pxweb.bfs.admin.ch/api/v1/fr/px-x-0102020203_110/px-x-0102020203_110.px",
             json=query
         )
         
-        # Parse the data
+        # Parse the response data
         data_json = json.loads(data_response.text)
         
         # Create a dataframe
         rows = []
-        if 'dimension' in data_json and 'value' in data_json:
+        if 'value' in data_json:
             values = data_json['value']
             size0 = len(variables[0]['values'])
             size1 = len(variables[1]['values'])
@@ -853,7 +862,7 @@ def get_divorce_data():
         divorces_df = pd.DataFrame(rows)
         
         # Convert year to datetime and value to numeric
-        divorces_df['date'] = pd.to_numeric(divorces_df['date'])
+        divorces_df['date'] = pd.to_datetime(divorces_df['date'], format='%Y')
         divorces_df['value'] = pd.to_numeric(divorces_df['value'], errors='coerce')
         
         # Pivot the dataframe to have indicators as columns
@@ -906,7 +915,8 @@ def get_and_merge_all_data():
     q_gdp_df = get_and_process_snb_data_two_header_levels(url="https://data.snb.ch/api/cube/gdpgnp/data/json/en")
     q_gdp_df = q_gdp_df[['date', 'Value, in CHF millions - Gross domestic product']]
     gdp_df = group_data_by_year_sum(q_gdp_df)
-    gdp_df = gdp_df[gdp_df['date'].dt.year != 2024]
+    this_year = datetime.datetime.now().year
+    gdp_df = gdp_df[gdp_df['date'].dt.year != this_year]
     
     # Get Population Data
     population_df = get_swiss_population_data()
@@ -931,6 +941,8 @@ def get_and_merge_all_data():
     
     for df in dataframes:
         merged_df = merged_df.merge(df, on='date', how='outer')
+    
+    
     
     return merged_df
 
