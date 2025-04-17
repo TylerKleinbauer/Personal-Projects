@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/460749327927460266/a65fa9bed3564f8795eed40fea7ca2aa/artifacts
+end_time: 1744901517212
+entry_point_name: ''
+experiment_id: '460749327927460266'
+lifecycle_stage: active
+run_id: a65fa9bed3564f8795eed40fea7ca2aa
+run_name: run_20250417_165154
+run_uuid: a65fa9bed3564f8795eed40fea7ca2aa
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1744901514473
+status: 3
+tags: []
+user_id: TylerKleinbauer
