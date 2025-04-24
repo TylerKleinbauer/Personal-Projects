@@ -5,6 +5,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.feature_selection import RFE
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+from data_ingestion import get_vacancy_rate_data, get_new_housing_construction_data, get_urban_population_data, get_divorce_data
+
 ########################################################################################
 # Data Preprocessing and Feature Engineering
 ########################################################################################
@@ -314,6 +316,77 @@ def prepare_data(merged_data_df):
 
     preprocessed_df = preprocessed_df.ffill()
 
+    return preprocessed_df
+
+
+def get_and_merge_new_data(merged_data_df):
+    """ 
+    Adding Vacancy rates, new housing constructions, urban population, divorces, regulatory era and covid years.
+    """
+
+    # Getting new data
+    vacancy_rate_df = get_vacancy_rate_data()
+    housing_construction_df = get_new_housing_construction_data()
+    urban_population_df = get_urban_population_data()
+    divorces_df = get_divorce_data()
+    
+    # Start with the original dataframe
+    enriched_df = merged_data_df.copy()
+    
+    # Merge each dataframe one by one
+    dfs = [
+        (vacancy_rate_df, "Vacancy rates DataFrame"),
+        (housing_construction_df, "Housing Construction DataFrame"),
+        (urban_population_df, "Urban Population DataFrame"),
+        (divorces_df, "Divorces DataFrame")
+    ]
+    
+    # Merge each DF with the enriched_df
+    for df, name in dfs:
+        # Ensure date formats are compatible
+        if df['date'].dtype != enriched_df['date'].dtype:
+            df['date'] = pd.to_datetime(df['date'])
+            
+        enriched_df = pd.merge(
+            left=enriched_df,
+            right=df,
+            how='left',
+            on='date'
+        )
+    
+    return enriched_df
+
+def add_covid_regulations(preprocessed_df):
+    """ 
+    Adding Covid years and regulatory eras to the DF.
+    """
+
+    preprocessed_df['date'] = pd.to_datetime(preprocessed_df['date'], format= '%Y')
+
+    # Define regulatory eras based on timeline
+    def assign_regulatory_era(year):
+        if year < 2003:  # Pre-Basel II, informal customs
+            return 0
+        elif 2003 <= year < 2011:  # Basel II, early formalization
+            return 1
+        elif 2011 <= year < 2014:  # SBA Guidelines (2011)
+            return 2
+        elif 2014 <= year < 2019:  # Post-CCyB, stricter equity (2014)
+            return 3
+        elif 2019 <= year < 2025:  # Investment property rules (2019)
+            return 4
+        elif year >= 2025:  # Basel III (2025)
+            return 5
+        return None  # Fallback, should not happen with your data
+
+    # Apply to model_df
+    preprocessed_df['regulatory_era'] = preprocessed_df['date'].dt.year.apply(assign_regulatory_era)
+
+    # COVID Feature
+    preprocessed_df['is_covid'] = preprocessed_df['date'].dt.year.isin([2020, 2021, 2022]).astype(int)
+
+    preprocessed_df['date'] = preprocessed_df['date'].dt.year
+    
     return preprocessed_df
 
 

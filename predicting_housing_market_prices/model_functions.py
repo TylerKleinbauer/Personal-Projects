@@ -20,6 +20,10 @@ def drop_other_targets(preprocessed_df, columns, target):
     
     return model_df
 
+########################################################################################
+# Model functions for training and evaluating models
+########################################################################################
+
 def prepare_data(model_df, target_column='houses_asking_price', train_size=0.8):
     """Prepare the data for modeling by splitting into train and test sets."""
     X = model_df.drop(columns=['date', target_column])
@@ -31,7 +35,7 @@ def prepare_data(model_df, target_column='houses_asking_price', train_size=0.8):
     
     return X_train, X_test, y_train, y_test
 
-def train_model(X_train, y_train, model_type='lasso', param_grid=None):
+def train_model_with_gs_cv(X_train, y_train, model_type='lasso', param_grid=None):
     """Train a model using grid search with time series cross-validation."""
     if param_grid is None:
         param_grid = {'model__alpha': list(np.arange(0.5, 1.6, 0.01).round(1))}
@@ -117,3 +121,39 @@ def plot_results(model_df, train_size, y_test, y_pred, best_model):
     plt.xticks(rotation=45)
     plt.savefig("plots/residuals_plot.png")
     plt.show()
+
+########################################################################################
+# Model functions for training the final model
+########################################################################################
+
+def train_final_model(X, y, model_type='lasso', alpha=None):
+    """
+    Train the final model on the complete dataset.
+    Uses the best hyperparameters found during experimentation.
+    
+    Parameters:
+    -----------
+    X : DataFrame
+        Feature matrix
+    y : Series
+        Target variable
+    model_type : str
+        Type of model to train ('lasso', 'ridge', 'elasticnet')
+    alpha : float, optional
+        Regularization parameter. If None, uses the best alpha found during CV.
+    """
+    # Create pipeline
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', Lasso(max_iter=50000, alpha=alpha) if model_type == 'lasso' else 
+                Ridge(alpha=alpha) if model_type == 'ridge' else 
+                ElasticNet(max_iter=50000, alpha=alpha))
+    ])
+    
+    # Fit on complete dataset
+    pipeline.fit(X, y)
+    
+    return pipeline
+
+
+

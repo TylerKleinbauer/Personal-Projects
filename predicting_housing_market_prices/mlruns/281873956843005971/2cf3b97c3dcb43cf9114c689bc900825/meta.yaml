@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/281873956843005971/2cf3b97c3dcb43cf9114c689bc900825/artifacts
+end_time: 1745506545819
+entry_point_name: ''
+experiment_id: '281873956843005971'
+lifecycle_stage: active
+run_id: 2cf3b97c3dcb43cf9114c689bc900825
+run_name: lasso_initial_data
+run_uuid: 2cf3b97c3dcb43cf9114c689bc900825
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1745506543212
+status: 3
+tags: []
+user_id: TylerKleinbauer
